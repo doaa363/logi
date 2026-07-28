@@ -227,4 +227,98 @@ export class ChatRoomController {
       return res.status(500).json({ success: false, message: error.message });
     }
   }
+
+  /**
+   * POST /api/chat-rooms/incident/:incidentId
+   * Idempotently gets or creates an INCIDENT chat room for the specified incident.
+   * Auto-adds requesting participant if they have proper access.
+   */
+  async getOrCreateIncidentRoom(req: AuthRequest, res: Response) {
+    try {
+      const { incidentId } = req.params;
+      const companyId = req.user?.companyId;
+      const userId = req.user?.sub;
+
+      if (!incidentId || !companyId || !userId || !mongoose.Types.ObjectId.isValid(incidentId as string)) {
+        return res.status(400).json({ success: false, message: "Invalid incident ID or missing authentication context" });
+      }
+
+      const incident = await Incident.findOne({
+        _id: new mongoose.Types.ObjectId(incidentId as string),
+        companyId: new mongoose.Types.ObjectId(companyId as string),
+      });
+
+      if (!incident) {
+        return res.status(404).json({ success: false, message: "Incident not found" });
+      }
+
+      const userObjectId = new mongoose.Types.ObjectId(userId);
+
+      // If room already linked to incident, retrieve it
+      if (incident.chatRoomId) {
+        const existingRoom = await ChatRoom.findOne({
+          _id: incident.chatRoomId,
+          companyId: new mongoose.Types.ObjectId(companyId as string)
+        }).populate("participants", "userName role email isOnline phone").populate("createdById", "userName role email");
+
+        if (existingRoom) {
+          // Check if current user is in participants; if not and allowed, add them
+          const inParticipants = existingRoom.participants.some((p: any) => String(p._id || p) === String(userId));
+          if (!inParticipants) {
+            await ChatRoom.findByIdAndUpdate(existingRoom._id, {
+              $addToSet: { participants: userObjectId }
+            });
+            const updatedRoom = await ChatRoom.findById(existingRoom._id)
+              .populate("participants", "userName role email isOnline phone")
+              .populate("createdById", "userName role email")
+              .lean();
+            return res.status(200).json({ success: true, data: updatedRoom });
+          }
+          return res.status(200).json({ success: true, data: existingRoom });
+        }
+      }
+
+      // Check if a room already exists by incidentId just in case
+      const roomByIncident = await ChatRoom.findOne({
+        incidentId: incident._id,
+        companyId: new mongoose.Types.ObjectId(companyId as string)
+      }).populate("participants", "userName role email isOnline phone").populate("createdById", "userName role email");
+
+      if (roomByIncident) {
+        incident.chatRoomId = roomByIncident._id as any;
+        await incident.save();
+        return res.status(200).json({ success: true, data: roomByIncident });
+      }
+
+      // Create new incident room
+      const participantsList = [new mongoose.Types.ObjectId(String(incident.reportedBy))];
+      if (String(incident.reportedBy) !== String(userId)) {
+        participantsList.push(userObjectId);
+      }
+      if (incident.assignedTo && String(incident.assignedTo) !== String(userId) && String(incident.assignedTo) !== String(incident.reportedBy)) {
+        participantsList.push(new mongoose.Types.ObjectId(String(incident.assignedTo)));
+      }
+
+      const newRoom = await ChatRoom.create({
+        companyId: new mongoose.Types.ObjectId(companyId as string),
+        type: ChatRoomType.INCIDENT,
+        participants: participantsList,
+        incidentId: incident._id,
+        title: incident.title || `Incident #${String(incident._id).slice(-6)}`,
+        createdById: userObjectId
+      });
+
+      incident.chatRoomId = newRoom._id as any;
+      await incident.save();
+
+      const populatedRoom = await ChatRoom.findById(newRoom._id)
+        .populate("participants", "userName role email isOnline phone")
+        .populate("createdById", "userName role email")
+        .lean();
+
+      return res.status(201).json({ success: true, data: populatedRoom });
+    } catch (error: any) {
+      return res.status(500).json({ success: false, message: error.message });
+    }
+  }
 }

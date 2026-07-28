@@ -120,4 +120,108 @@ export class IncidentActionController {
       return res.status(500).json({ success: false, message: error.message });
     }
   }
+
+  /**
+   * POST /api/incidents/:id/escalate-to-manager
+   * Escalate incident directly to a specific manager (CS_MANAGER, DRIVER_MANAGER, OWNER).
+   * Available to CS_AGENT and CS_MANAGER.
+   */
+  async escalateToManager(req: AuthRequest, res: Response) {
+    try {
+      const { id } = req.params;
+      const { managerId, issueTitle } = req.body;
+      const companyId = req.user?.companyId;
+      const userId = req.user?.sub;
+
+      if (!id || !managerId || !companyId || !mongoose.Types.ObjectId.isValid(id as string) || !mongoose.Types.ObjectId.isValid(managerId as string)) {
+        return res.status(400).json({ success: false, message: "Invalid incident ID, manager ID, or missing context" });
+      }
+
+      const incident = await Incident.findOne({
+        _id: new mongoose.Types.ObjectId(id as string),
+        companyId: new mongoose.Types.ObjectId(companyId as string),
+      });
+
+      if (!incident) {
+        return res.status(404).json({ success: false, message: "Incident not found" });
+      }
+
+      const managerObjId = new mongoose.Types.ObjectId(managerId as string);
+      incident.escalatedByManager = true;
+      incident.escalatedBy = new mongoose.Types.ObjectId(userId);
+      incident.assignedTo = managerObjId;
+      incident.status = "IN_PROGRESS" as any;
+      await incident.save();
+
+      // Ensure room exists or update participants
+      let room: any = null;
+      if (incident.chatRoomId) {
+        room = await ChatRoom.findOne({ _id: incident.chatRoomId, companyId: incident.companyId });
+      }
+      if (!room) {
+        room = await ChatRoom.findOne({ incidentId: incident._id, companyId: incident.companyId });
+      }
+      if (!room) {
+        const participantsList = [new mongoose.Types.ObjectId(String(incident.reportedBy))];
+        if (userId && String(incident.reportedBy) !== String(userId)) {
+          participantsList.push(new mongoose.Types.ObjectId(userId));
+        }
+        participantsList.push(managerObjId);
+        
+        room = await ChatRoom.create({
+          companyId: new mongoose.Types.ObjectId(companyId as string),
+          type: ChatRoomType.INCIDENT,
+          participants: participantsList,
+          incidentId: incident._id,
+          title: issueTitle || incident.title || `Escalation: ${incident.title}`,
+          createdById: new mongoose.Types.ObjectId(userId)
+        });
+        incident.chatRoomId = room._id as any;
+        await incident.save();
+      } else {
+        await ChatRoom.findByIdAndUpdate(room._id, {
+          $addToSet: { participants: managerObjId }
+        });
+        if (issueTitle && !room.title) {
+          room.title = issueTitle;
+          await room.save();
+        }
+      }
+
+      const populatedRoom = await ChatRoom.findById(room._id)
+        .populate("participants", "userName role email isOnline phone")
+        .populate("createdById", "userName role email")
+        .lean();
+
+      // Emit real-time socket events
+      const io = getIo();
+      if (io) {
+        io.to(`user_${managerId}`).emit("new_escalation_chat", {
+          room: populatedRoom,
+          incident,
+          escalationTitle: issueTitle || incident.title,
+          escalatedBy: req.user?.sub,
+          timestamp: new Date().toISOString()
+        });
+        io.to(`user_${managerId}`).emit("incident:escalated", {
+          incidentId: incident._id,
+          escalatedBy: req.user?.sub,
+          message: `🚨 Emergency Escalation: ${issueTitle || incident.title}`
+        });
+        io.to(String(room._id)).emit("incident:escalation_updated", {
+          incident,
+          managerId,
+          room: populatedRoom
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: "Incident escalated to manager successfully.",
+        data: { incident, room: populatedRoom }
+      });
+    } catch (error: any) {
+      return res.status(500).json({ success: false, message: error.message });
+    }
+  }
 }

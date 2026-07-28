@@ -91,4 +91,12 @@ router.post(
   actionController.escalateIncident.bind(actionController)
 );
 
+// Escalate directly to a Manager (CS_AGENT and CS_MANAGER)
+router.post(
+  "/:id/escalate-to-manager",
+  authenticate,
+  authorize(UserRole.CS_AGENT, UserRole.CS_MANAGER, UserRole.DRIVER_MANAGER, UserRole.OWNER),
+  actionController.escalateToManager.bind(actionController)
+);
+
 export default router;

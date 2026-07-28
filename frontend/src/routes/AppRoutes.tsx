@@ -6,6 +6,8 @@ import ShipmentsPage from "../features/shipment/pages/ShipmentsPage";
 import ShipmentDetailsPage from "../features/shipment/pages/ShipmentDetailsPage";
 import IncidentsPage from "../features/incident/pages/IncidentsPage";
 import IncidentDetailsPage from "../features/incident/pages/IncidentDetailsPage";
+import CSIncidentHub from "../features/incident/pages/CSIncidentHub";
+import ManagerEscalationWorkspace from "../features/incident/pages/ManagerEscalationWorkspace";
 import DriverReconciliationPage from "../features/shipment/pages/DriverReconciliationPage";
 import LiveTrackingPage from "../features/shipment/pages/LiveTrackingPage";
 import { DepartmentDetailPage } from "../features/department/pages/DepartmentDetailPage";
@@ -37,6 +39,8 @@ export default function AppRoutes() {
           <Route element={<DashbordLayout />}>
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/dashboard/cs" element={<Dashboard />} />
+            <Route path="/dashboard/cs-incidents" element={<CSIncidentHub />} />
+            <Route path="/dashboard/escalations" element={<ManagerEscalationWorkspace />} />
             <Route path="/dashboard/owner" element={<Dashboard />} />
             <Route path="/dashboard/accounting" element={<Dashboard />} />
             <Route path="/dashboard/tracking" element={<Dashboard />} />

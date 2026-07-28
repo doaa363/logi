@@ -30,4 +30,10 @@ router.post(
   controller.createManagerEscalationRoom.bind(controller)
 );
 
+router.post(
+  "/incident/:incidentId",
+  authenticate,
+  controller.getOrCreateIncidentRoom.bind(controller)
+);
+
 export default router;
