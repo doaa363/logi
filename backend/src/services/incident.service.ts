@@ -464,7 +464,7 @@ export class IncidentService {
   // ══════════════════════════════════════════════════════════════════════════
 
   /** List all incidents scoped to the requesting user's company */
-  async listIncidents(companyId?: string) {
+  async listIncidents(companyId?: string, userId?: string, role?: string) {
     if (!companyId) {
       throw new IncidentError(
         IncidentErrorCode.AUTH_REQUIRED,
@@ -473,7 +473,14 @@ export class IncidentService {
       );
     }
 
-    return Incident.find({ companyId })
+    const query: any = { companyId };
+
+    // Drivers only see their own incidents
+    if (role === "DRIVER" && userId) {
+      query.reportedBy = new mongoose.Types.ObjectId(userId);
+    }
+
+    return Incident.find(query)
       .sort({ createdAt: -1 })
       .populate("reportedBy", "userName email role")
       .lean();

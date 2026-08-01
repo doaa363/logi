@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { useSelector } from "react-redux";
 import {
   ShieldAlert,
@@ -32,6 +32,9 @@ export const CSIncidentHub: React.FC = () => {
   const [severityFilter, setSeverityFilter] = useState<string>("ALL");
   const [isEscalateOpen, setIsEscalateOpen] = useState<boolean>(false);
   const [refreshTrigger, setRefreshTrigger] = useState<number>(0);
+  const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
+
+  const activeRoomIdRef = useRef<string | null>(null);
 
   const loadIncidents = async () => {
     setLoading(true);
@@ -78,10 +81,26 @@ export const CSIncidentHub: React.FC = () => {
     socket.on("incident:escalated", handleEscalated);
     socket.on("incident:escalated_updated", handleEscalated);
 
+    // Unread badge per incident
+    const handleNewMessage = (msg: any) => {
+      const roomId = String(msg.roomId);
+      if (roomId === activeRoomIdRef.current) return;
+      if (String(msg.senderId) === String(user?.id)) return;
+      setIncidents((prev) => {
+        const matched = prev.find((inc) => inc.chatRoomId === roomId);
+        if (matched) {
+          setUnreadCounts((counts) => ({ ...counts, [matched._id]: (counts[matched._id] || 0) + 1 }));
+        }
+        return prev;
+      });
+    };
+    socket.on("new_message", handleNewMessage);
+
     return () => {
       socket.off("fleet:incident_alert", handleNewIncidentAlert);
       socket.off("incident:escalated", handleEscalated);
       socket.off("incident:escalated_updated", handleEscalated);
+      socket.off("new_message", handleNewMessage);
     };
   }, [socket]);
 
@@ -185,10 +204,16 @@ export const CSIncidentHub: React.FC = () => {
               return (
                 <div
                   key={inc._id}
-                  onClick={() => setSelectedIncident(inc)}
+                  onClick={() => {
+                    activeRoomIdRef.current = inc.chatRoomId || null;
+                    setUnreadCounts((prev) => ({ ...prev, [inc._id]: 0 }));
+                    setSelectedIncident(inc);
+                  }}
                   className={`group rounded-2xl p-3.5 transition cursor-pointer border ${
                     isSelected
                       ? "border-sky-500/80 bg-gradient-to-r from-sky-50 to-indigo-50/60 dark:from-sky-950/40 dark:via-slate-900 dark:to-slate-900 shadow-md ring-2 ring-sky-500/20"
+                      : unreadCounts[inc._id] > 0
+                      ? "border-sky-400 bg-sky-50 dark:bg-sky-950/20"
                       : "border-transparent hover:bg-slate-50 dark:hover:bg-slate-800/50"
                   }`}
                 >
@@ -208,6 +233,11 @@ export const CSIncidentHub: React.FC = () => {
                         Reporter: <span className="font-bold text-slate-700 dark:text-slate-200">{driverName}</span>
                       </p>
                     </div>
+                    {unreadCounts[inc._id] > 0 && (
+                      <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-sky-500 px-1.5 text-[10px] font-black text-white shadow-sm shrink-0">
+                        {unreadCounts[inc._id] > 99 ? "99+" : unreadCounts[inc._id]}
+                      </span>
+                    )}
                   </div>
 
                   <div className="mt-2.5 flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800/60">

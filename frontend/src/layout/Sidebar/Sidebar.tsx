@@ -7,6 +7,7 @@ import PresenceDot from "../../components/ui/PresenceDot";
 import { connectSocket } from "../../features/chat/socket";
 import { useLanguage } from "../../context/LanguageContext";
 import { UserRole } from "../../types/user.types";
+import { useUnreadMessages } from "../../hooks/useUnreadMessages";
 import { motion } from "framer-motion";
 import {
   LayoutDashboard,
@@ -23,6 +24,7 @@ import {
   ChevronRight,
   ShieldAlert,
   Headphones,
+  MessageSquare,
 } from "lucide-react";
 
 interface NavItemConfig {
@@ -68,6 +70,8 @@ export default function Sidebar() {
     return localStorage.getItem("sidebarCollapsed") === "true";
   });
 
+  const { unreadTotal, chatRoute } = useUnreadMessages();
+
   const toggleCollapse = () => {
     setIsCollapsed((prev) => {
       const next = !prev;
@@ -90,7 +94,8 @@ export default function Sidebar() {
     description: string,
     Icon: React.ElementType,
     end?: boolean,
-    badgeText?: string
+    badgeText?: string,
+    unreadCount?: number
   ) => {
     return (
       <NavLink
@@ -133,11 +138,13 @@ export default function Sidebar() {
                   >
                     {label}
                   </span>
-                  {badgeText && (
-                    <span className="rounded bg-rose-500/20 px-1.5 py-0.5 text-[9px] font-black uppercase text-rose-400 border border-rose-500/30">
-                      {badgeText}
-                    </span>
-                  )}
+                  <div className="flex items-center gap-1">
+                    {badgeText && (
+                      <span className="rounded bg-rose-500/20 px-1.5 py-0.5 text-[9px] font-black uppercase text-rose-400 border border-rose-500/30">
+                        {badgeText}
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <span className="text-[11px] text-slate-400 truncate transition-colors">
                   {description}
@@ -195,16 +202,25 @@ export default function Sidebar() {
             }
             return true;
           })
-          .map((item) => renderNavItem(item.to, item.label, item.description, item.icon, item.end))}
+          .map((item) => {
+            // Pass unreadTotal to the Incidents link for DRIVER
+            const isDriverIncidents = item.to === "/incidents" && user?.role === UserRole.DRIVER;
+            return renderNavItem(item.to, item.label, item.description, item.icon, item.end, undefined, isDriverIncidents ? unreadTotal : undefined);
+          })}
+
+        {/* CS Chat Hub for CS_AGENT */}
+        {user && ["CS_AGENT", UserRole.CS_AGENT].includes(user.role as string) &&
+          renderNavItem("/dashboard/cs-chats", "Open Chats", "My conversations & queue", MessageSquare, false, undefined, unreadTotal)
+        }
 
         {/* Dedicated CS Support Hub for CS_AGENT & CS_MANAGER */}
         {user && ["CS_AGENT", UserRole.CS_AGENT, "CS_MANAGER", UserRole.CS_MANAGER, "OWNER", UserRole.OWNER].includes(user.role as string) &&
-          renderNavItem("/dashboard/cs-incidents", "CS Support Hub", "Live incident triage", Headphones, false, "Live")
+          renderNavItem("/dashboard/cs-incidents", "CS Support Hub", "Live incident triage", Headphones)
         }
 
         {/* Dedicated Executive Escalation Workspace for Managers */}
         {user && ["CS_MANAGER", UserRole.CS_MANAGER, "DRIVER_MANAGER", UserRole.DRIVER_MANAGER, "FLEET_MANAGER", UserRole.FLEET_MANAGER, "OWNER", UserRole.OWNER, "ADMIN"].includes(user.role as string) &&
-          renderNavItem("/dashboard/escalations", "Escalations", "3-way manager suite", ShieldAlert, false, "3-Way")
+          renderNavItem("/dashboard/escalations", "Escalations", "3-way manager suite", ShieldAlert)
         }
 
         {user && [UserRole.OWNER, "ADMIN"].includes(user.role as string) &&

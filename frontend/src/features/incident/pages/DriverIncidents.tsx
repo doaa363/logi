@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { useSelector } from "react-redux";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -26,6 +26,7 @@ import api from "../../../api/axios";
 import { IncidentChatPanel } from "../components/IncidentChatPanel";
 import { IncidentStatusBadge } from "../components/IncidentStatusBadge";
 import { incidentService } from "../incident.service";
+import { useSocket } from "../../../hooks/useSocket";
 import type { Incident } from "../../../types/incident.types";
 import type { RootState } from "../../../app/store";
 
@@ -115,6 +116,7 @@ const CATEGORY_PRESETS: CategoryPreset[] = [
 
 export default function DriverIncidents() {
   const { user } = useSelector((state: RootState) => state.auth);
+  const { socket } = useSocket();
 
   // States
   const [selectedPreset, setSelectedPreset] = useState<CategoryPreset>(CATEGORY_PRESETS[0]);
@@ -142,6 +144,10 @@ export default function DriverIncidents() {
   const [submitting, setSubmitting] = useState(false);
   const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [activeFilterTab, setActiveFilterTab] = useState<"ALL" | "PENDING" | "RESOLVED">("ALL");
+  const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
+
+  // Ref to track active chatRoomId without stale closures
+  const activeRoomIdRef = useRef<string | null>(null);
 
   const showToast = (type: "success" | "error", message: string) => {
     setToast({ type, message });
@@ -203,6 +209,39 @@ export default function DriverIncidents() {
     void fetchIncidents();
     captureGps();
   }, []);
+
+  // Socket: join all incident rooms when socket connects, then track unread
+  useEffect(() => {
+    if (!socket || reportedIncidents.length === 0) return;
+    // Join all rooms so new_message events are received
+    reportedIncidents.forEach((inc) => {
+      if (inc.chatRoomId) {
+        const roomId = typeof inc.chatRoomId === "object"
+          ? (inc.chatRoomId as any).toString()
+          : String(inc.chatRoomId);
+        socket.emit("join_room", { roomId });
+      }
+    });
+  }, [socket, reportedIncidents.length]);
+
+  // Socket: track unread messages per incident chatRoom
+  useEffect(() => {
+    if (!socket) return;
+    const handleNewMessage = (msg: any) => {
+      const roomId = String(msg.roomId);
+      if (roomId === activeRoomIdRef.current) return;
+      if (String(msg.senderId) === String(user?.id)) return;
+      setReportedIncidents((prev) => {
+        const matched = prev.find((inc) => String(inc.chatRoomId) === roomId);
+        if (matched) {
+          setUnreadCounts((counts) => ({ ...counts, [matched._id]: (counts[matched._id] || 0) + 1 }));
+        }
+        return prev;
+      });
+    };
+    socket.on("new_message", handleNewMessage);
+    return () => { socket.off("new_message", handleNewMessage); };
+  }, [socket, user?.id]);
 
   useEffect(() => {
     let interval: any = null;
@@ -269,6 +308,8 @@ export default function DriverIncidents() {
       
       // Open real-time chat immediately
       if (newIncident && newIncident._id) {
+        activeRoomIdRef.current = newIncident.chatRoomId || null;
+        setUnreadCounts((prev) => ({ ...prev, [newIncident._id]: 0 }));
         setActiveChatIncident(newIncident);
       }
     } catch (err: any) {
@@ -307,7 +348,10 @@ export default function DriverIncidents() {
               {activeChatIncident && (
                 <button
                   type="button"
-                  onClick={() => setActiveChatIncident(null)}
+                  onClick={() => {
+                    activeRoomIdRef.current = null;
+                    setActiveChatIncident(null);
+                  }}
                   className="flex items-center gap-2 rounded-2xl border border-slate-300 bg-slate-100 px-4 py-3 text-xs font-bold text-slate-700 hover:bg-slate-200 transition"
                 >
                   <ArrowLeft className="h-4 w-4" /> Back to Reporting Portal
@@ -371,7 +415,10 @@ export default function DriverIncidents() {
                       </div>
                     </div>
                     <button
-                      onClick={() => setActiveChatIncident(null)}
+                      onClick={() => {
+                        activeRoomIdRef.current = null;
+                        setActiveChatIncident(null);
+                      }}
                       className="w-full rounded-xl bg-slate-900 text-white py-3 text-xs font-extrabold hover:bg-slate-800 transition shadow-md"
                     >
                       New Incident Report +
@@ -671,12 +718,22 @@ export default function DriverIncidents() {
                           initial={{ opacity: 0, y: 8 }}
                           animate={{ opacity: 1, y: 0 }}
                           transition={{ delay: idx * 0.05 }}
-                          onClick={() => setActiveChatIncident(incident)}
-                          className="group flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 transition hover:bg-slate-100/80 cursor-pointer hover:border-emerald-500/50 hover:shadow-sm"
+                          onClick={() => {
+                            activeRoomIdRef.current = incident.chatRoomId || null;
+                            setUnreadCounts((prev) => ({ ...prev, [incident._id]: 0 }));
+                            setActiveChatIncident(incident);
+                          }}
+                          className={`group flex items-center justify-between gap-3 rounded-2xl border p-4 transition cursor-pointer hover:shadow-sm ${
+                            unreadCounts[incident._id] > 0
+                              ? "border-emerald-400 bg-emerald-50 shadow-sm"
+                              : "border-slate-200 bg-slate-50 hover:bg-slate-100/80 hover:border-emerald-500/50"
+                          }`}
                         >
                           <div className="space-y-1 min-w-0 flex-1">
                             <div className="flex items-center gap-2">
-                              <h3 className="text-xs font-extrabold text-slate-900 truncate group-hover:text-emerald-700 transition-colors">
+                              <h3 className={`text-xs font-extrabold truncate transition-colors ${
+                                unreadCounts[incident._id] > 0 ? "text-emerald-800" : "text-slate-900 group-hover:text-emerald-700"
+                              }`}>
                                 {incident.title}
                               </h3>
                               <span className="text-[9px] font-black uppercase text-slate-400">
@@ -692,6 +749,11 @@ export default function DriverIncidents() {
                           </div>
 
                           <div className="flex-shrink-0 flex flex-col items-end gap-2">
+                            {unreadCounts[incident._id] > 0 && (
+                              <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-emerald-500 px-1.5 text-[10px] font-black text-white shadow-sm">
+                                {unreadCounts[incident._id] > 99 ? "99+" : unreadCounts[incident._id]}
+                              </span>
+                            )}
                             <IncidentStatusBadge status={incident.status} />
                             <span className="flex items-center gap-1 text-[10px] font-extrabold text-emerald-600 group-hover:underline">
                               <MessageSquare className="h-3 w-3" /> Open Live Chat

@@ -18,8 +18,10 @@ export const incidentService = {
   },
 
   createDriverIncident: async (payload: Record<string, unknown>): Promise<Incident> => {
-    const response = await api.post<{ success: boolean; data: Incident }>('/incidents/driver', payload);
-    return response.data.data;
+    const response = await api.post<{ success: boolean; data: { incident: Incident } | Incident }>('/incidents/driver', payload);
+    const data = response.data.data as any;
+    // Backend returns { incident, shipment, timeline } — extract incident
+    return data?.incident ?? data;
   },
   
   updateIncidentStatus: async (id: string, status: string): Promise<Incident> => {

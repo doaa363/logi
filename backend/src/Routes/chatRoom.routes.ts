@@ -11,19 +11,7 @@ router.get(
   controller.getRooms.bind(controller)
 );
 
-router.get(
-  "/:id/messages",
-  authenticate,
-  controller.getMessages.bind(controller)
-);
-
-router.post(
-  "/:id/resolve",
-  authenticate,
-  controller.resolveRoom.bind(controller)
-);
-
-
+// Static routes MUST come before dynamic /:id routes
 router.post(
   "/escalate",
   authenticate,
@@ -34,6 +22,18 @@ router.post(
   "/incident/:incidentId",
   authenticate,
   controller.getOrCreateIncidentRoom.bind(controller)
+);
+
+router.get(
+  "/:id/messages",
+  authenticate,
+  controller.getMessages.bind(controller)
+);
+
+router.post(
+  "/:id/resolve",
+  authenticate,
+  controller.resolveRoom.bind(controller)
 );
 
 export default router;

@@ -93,7 +93,14 @@ export interface IncidentChatRoom {
   companyId: string;
   type: "INCIDENT" | "DIRECT" | "GROUP";
   participants: (string | IncidentUser)[];
-  incidentId?: string;
+  incidentId?: string | {
+    _id: string;
+    title: string;
+    severity: IncidentSeverity;
+    status: IncidentStatus;
+    description?: string;
+    reportedBy?: string | { _id: string; userName: string };
+  };
   title?: string | null;
   createdById?: string | IncidentUser | null;
   createdAt?: string;

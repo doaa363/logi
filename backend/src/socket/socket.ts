@@ -119,14 +119,21 @@ export function initSocket(httpServer: HttpServer): SocketServer {
         const room = await ChatRoom.findOne({
           _id: roomId,
           companyId: new mongoose.Types.ObjectId(companyId)
-        }).lean();
+        });
 
         if (!room) {
           socket.emit("error", { message: "Room not found or access denied." });
           return;
         }
 
-        // Join the socket.io room specific to this ChatRoom
+        const isParticipant = room.participants.some((p: any) => String(p) === String(userId));
+
+        // Only join socket room if already a participant
+        if (!isParticipant) {
+          // Silent fail — don't emit error, just don't join
+          return;
+        }
+
         await socket.join(roomId);
         socket.emit("room_joined", { roomId });
       } catch (err) {
@@ -152,6 +159,13 @@ export function initSocket(httpServer: HttpServer): SocketServer {
 
         if (!room) {
           socket.emit("error", { message: "Room not found or access denied." });
+          return;
+        }
+
+        // Only participants can send messages
+        const isParticipant = room.participants.some((p: any) => String(p) === String(userId));
+        if (!isParticipant) {
+          socket.emit("error", { message: "Not a participant of this room." });
           return;
         }
 
