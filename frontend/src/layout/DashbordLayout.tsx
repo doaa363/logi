@@ -79,7 +79,7 @@ export default function DashbordLayout() {
   };
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-slate-900">
+    <div className="flex h-screen w-full overflow-hidden bg-[#0f172a]">
       {/* Toast Notification Layer */}
       <div className="pointer-events-none fixed right-4 top-4 z-50 flex w-full max-w-sm flex-col gap-3">
         {alerts.map((alert) => {
@@ -93,7 +93,7 @@ export default function DashbordLayout() {
                 ${colors.bg} ${colors.border}
               `}
               onClick={() => {
-                navigate(`/incidents/${alert.incidentId}`);
+                navigate(`/dashboard/cs-incidents`);
                 removeAlert(alert.id);
               }}
               role="alert"
@@ -138,7 +138,7 @@ export default function DashbordLayout() {
               {/* Alert Footer details */}
               <div className="flex items-center justify-between border-t border-white/10 bg-black/10 px-4 py-2 text-[10px] font-semibold text-white/90">
                 <span className={colors.subtext}>Shipment: {alert.trackingNumber}</span>
-                <span className="text-[9px] opacity-75">Click to view details &rarr;</span>
+                <span className="text-[9px] opacity-75">Click to view in CS Support Hub &rarr;</span>
               </div>
             </div>
           );
@@ -146,7 +146,7 @@ export default function DashbordLayout() {
       </div>
 
       <Sidebar />
-      <main className="flex-1 min-w-0 h-screen overflow-y-auto overflow-x-hidden bg-slate-50">
+      <main className="relative flex-1 min-w-0 h-screen overflow-y-auto overflow-x-hidden bg-slate-50 flex flex-col">
         <Outlet />
       </main>
 

@@ -28,14 +28,27 @@ export class ChatRoomController {
         query.type = type;
       }
 
-      // If user is a driver, only show rooms they are participating in
+      // Drivers and CS_AGENTs only see their own rooms + unassigned rooms
       if (req.user?.role === UserRole.DRIVER) {
         query.participants = req.user.sub;
+      } else if (req.user?.role === UserRole.CS_AGENT) {
+        const userId = req.user.sub;
+        const { User } = await import("../models/User.model.js");
+        const csAgents = await User.find({ companyId: new mongoose.Types.ObjectId(companyId), role: UserRole.CS_AGENT }).select("_id").lean();
+        const csAgentIds = csAgents.map((u: any) => new mongoose.Types.ObjectId(u._id.toString()));
+
+        // Merge companyId into each $or branch to avoid conflict
+        query.$or = [
+          { companyId: new mongoose.Types.ObjectId(companyId), participants: new mongoose.Types.ObjectId(userId) },
+          { companyId: new mongoose.Types.ObjectId(companyId), participants: { $not: { $elemMatch: { $in: csAgentIds } } } },
+        ];
+        delete query.companyId; // remove top-level companyId since it's now inside $or
       }
 
       const rooms = await ChatRoom.find(query)
         .populate("participants", "userName role email")
-        .populate("createdById", "userName role email") // Populate escalation creator profile
+        .populate("createdById", "userName role email")
+        .populate({ path: "incidentId", select: "title severity status description reportedBy", populate: { path: "reportedBy", select: "userName" } })
         .sort({ updatedAt: -1 })
         .lean();
 
@@ -67,9 +80,12 @@ export class ChatRoomController {
         return res.status(404).json({ success: false, message: "Chat room not found" });
       }
 
-      // Check participant access (unless they are a manager who can oversee all)
-      const isManager = req.user?.role && [UserRole.CS_MANAGER, UserRole.DRIVER_MANAGER, UserRole.OWNER].includes(req.user.role as UserRole);
-      
+      // Managers (CS_MANAGER, DRIVER_MANAGER, OWNER) can oversee all rooms
+      // CS_AGENT can only access rooms they are a participant in
+      const isManager = req.user?.role && [
+        UserRole.CS_MANAGER, UserRole.DRIVER_MANAGER, UserRole.OWNER
+      ].includes(req.user.role as UserRole);
+
       const isParticipant = room.participants.some(
         (p: mongoose.Types.ObjectId) => String(p) === String(req.user?.sub)
       );
@@ -194,13 +210,6 @@ export class ChatRoomController {
         return res.status(404).json({ success: false, message: "Associated incident not found." });
       }
 
-      // If CS_AGENT, must be assigned to the ticket
-      if (role === UserRole.CS_AGENT) {
-        if (String(incident.assignedTo) !== String(userId)) {
-          return res.status(403).json({ success: false, message: "You can only resolve incidents you are assigned to." });
-        }
-      }
-
       // Mark incident as RESOLVED
       incident.status = "RESOLVED" as any;
       incident.resolvedAt = new Date();
@@ -223,6 +232,103 @@ export class ChatRoomController {
         message: "Room resolved successfully.",
         data: { roomId: room._id, incidentId: incident._id, status: incident.status }
       });
+    } catch (error: any) {
+      return res.status(500).json({ success: false, message: error.message });
+    }
+  }
+
+  /**
+   * POST /api/chat-rooms/incident/:incidentId
+   * Idempotently gets or creates an INCIDENT chat room for the specified incident.
+   * Auto-adds requesting participant if they have proper access.
+   */
+  async getOrCreateIncidentRoom(req: AuthRequest, res: Response) {
+    try {
+      const { incidentId } = req.params;
+      const companyId = req.user?.companyId;
+      const userId = req.user?.sub;
+
+      if (!incidentId || !companyId || !userId || !mongoose.Types.ObjectId.isValid(incidentId as string)) {
+        return res.status(400).json({ success: false, message: "Invalid incident ID or missing authentication context" });
+      }
+
+      const incident = await Incident.findOne({
+        _id: new mongoose.Types.ObjectId(incidentId as string),
+        companyId: new mongoose.Types.ObjectId(companyId as string),
+      });
+
+      if (!incident) {
+        return res.status(404).json({ success: false, message: "Incident not found" });
+      }
+
+      const userObjectId = new mongoose.Types.ObjectId(userId);
+      const role = req.user?.role;
+
+      // If room already linked to incident, retrieve it
+      if (incident.chatRoomId) {
+        const existingRoom = await ChatRoom.findOne({
+          _id: incident.chatRoomId,
+          companyId: new mongoose.Types.ObjectId(companyId as string)
+        }).populate("participants", "userName role email isOnline phone").populate("createdById", "userName role email");
+
+        if (existingRoom) {
+          const inParticipants = existingRoom.participants.some((p: any) => String(p._id || p) === String(userId));
+          // Only add as participant if: they are the driver/reporter, or a manager (not a random CS_AGENT)
+          const canJoin = String(incident.reportedBy) === String(userId) ||
+            [UserRole.CS_MANAGER, UserRole.DRIVER_MANAGER, UserRole.OWNER].includes(role as UserRole);
+          if (!inParticipants && canJoin) {
+            await ChatRoom.findByIdAndUpdate(existingRoom._id, {
+              $addToSet: { participants: userObjectId }
+            });
+            const updatedRoom = await ChatRoom.findById(existingRoom._id)
+              .populate("participants", "userName role email isOnline phone")
+              .populate("createdById", "userName role email")
+              .lean();
+            return res.status(200).json({ success: true, data: updatedRoom });
+          }
+          return res.status(200).json({ success: true, data: existingRoom });
+        }
+      }
+
+      // Check if a room already exists by incidentId just in case
+      const roomByIncident = await ChatRoom.findOne({
+        incidentId: incident._id,
+        companyId: new mongoose.Types.ObjectId(companyId as string)
+      }).populate("participants", "userName role email isOnline phone").populate("createdById", "userName role email");
+
+      if (roomByIncident) {
+        incident.chatRoomId = roomByIncident._id as any;
+        await incident.save();
+        return res.status(200).json({ success: true, data: roomByIncident });
+      }
+
+      // Create new incident room
+      const participantsList = [new mongoose.Types.ObjectId(String(incident.reportedBy))];
+      if (String(incident.reportedBy) !== String(userId)) {
+        participantsList.push(userObjectId);
+      }
+      if (incident.assignedTo && String(incident.assignedTo) !== String(userId) && String(incident.assignedTo) !== String(incident.reportedBy)) {
+        participantsList.push(new mongoose.Types.ObjectId(String(incident.assignedTo)));
+      }
+
+      const newRoom = await ChatRoom.create({
+        companyId: new mongoose.Types.ObjectId(companyId as string),
+        type: ChatRoomType.INCIDENT,
+        participants: participantsList,
+        incidentId: incident._id,
+        title: incident.title || `Incident #${String(incident._id).slice(-6)}`,
+        createdById: userObjectId
+      });
+
+      incident.chatRoomId = newRoom._id as any;
+      await incident.save();
+
+      const populatedRoom = await ChatRoom.findById(newRoom._id)
+        .populate("participants", "userName role email isOnline phone")
+        .populate("createdById", "userName role email")
+        .lean();
+
+      return res.status(201).json({ success: true, data: populatedRoom });
     } catch (error: any) {
       return res.status(500).json({ success: false, message: error.message });
     }

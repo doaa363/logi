@@ -112,7 +112,9 @@ export class IncidentController {
   async list(req: AuthRequest, res: Response) {
     try {
       const incidents = await incidentService.listIncidents(
-        req.user?.companyId
+        req.user?.companyId,
+        req.user?.sub,
+        req.user?.role
       );
       return res.status(200).json({ success: true, data: incidents });
     } catch (error: any) {

@@ -103,12 +103,8 @@ const chatRoomSchema = new Schema<IChatRoom>(
     // ── Schema options ──────────────────────────────────────────────────────
     timestamps: true, 
     toJSON: {
-      virtuals: true, 
-      versionKey: false, 
-      transform(_doc, ret: Record<string, unknown>) {
-        ret["_id"] = undefined; 
-        return ret; 
-      },
+      virtuals: true,
+      versionKey: false,
     },
     toObject: {
       virtuals: true, 

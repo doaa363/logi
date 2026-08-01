@@ -13,6 +13,8 @@ import { ManagerWorkspace } from "../components/workspaces/ManagerWorkspace";
 import { DriverWorkspace } from "../components/workspaces/DriverWorkspace";
 import { FinanceManagerWorkspace } from "../components/workspaces/FinanceManagerWorkspace";
 import { OwnerCrisisCenter } from "../components/workspaces/OwnerCrisisCenter";
+import CSIncidentHub from "../features/incident/pages/CSIncidentHub";
+import ManagerEscalationWorkspace from "../features/incident/pages/ManagerEscalationWorkspace";
 import { useLanguage } from "../context/LanguageContext";
 import { UserRole } from "../types/user.types";
 
@@ -240,6 +242,12 @@ export default function Dashboard() {
   const role = user?.role?.toUpperCase() || "";
   const roleWorkspace = useMemo(() => {
     // ── Special path-based overrides (always checked first) ──────────────────
+    if (location.pathname.includes("cs-incidents")) {
+      return <CSIncidentHub />;
+    }
+    if (location.pathname.includes("escalations")) {
+      return <ManagerEscalationWorkspace />;
+    }
     if (location.pathname.includes("departments") && (role === UserRole.OWNER)) {
       return <DepartmentsManagementPanel />;
     }
