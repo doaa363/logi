@@ -96,16 +96,46 @@ export const IncidentChatPanel: React.FC<Props> = ({
   useEffect(() => {
     if (!socket || !room?._id) return;
 
-    // Join room
+    // Join room and mark it as read when the participant opens it
     socket.emit("join_room", { roomId: room._id });
 
     const handleNewMessage = (newMsg: ChatMessage) => {
       if (String(newMsg.roomId) === String(room._id)) {
         setMessages((prev) => {
-          if (newMsg._id && prev.some((m) => m._id === newMsg._id)) return prev;
-          return [...prev, newMsg];
+          const incomingMsg = {
+            ...newMsg,
+            senderId: String(newMsg.senderId || ""),
+            roomId: String(newMsg.roomId || room._id),
+          };
+
+          if (incomingMsg._id && prev.some((m) => String(m._id) === String(incomingMsg._id))) {
+            return prev;
+          }
+
+          const optimisticMatch = prev.find((m) => {
+            if (!m._id || String(m._id).startsWith("optimistic-")) {
+              if (String(m.senderId) !== String(incomingMsg.senderId)) return false;
+              if (m.text !== incomingMsg.text) return false;
+              const mTime = new Date(m.timestamp || m.createdAt || 0).getTime();
+              const nTime = new Date(incomingMsg.timestamp || incomingMsg.createdAt || 0).getTime();
+              return Math.abs(mTime - nTime) < 15000;
+            }
+            return false;
+          });
+
+          if (optimisticMatch) {
+            return prev.map((m) => (m === optimisticMatch ? { ...m, ...incomingMsg, _id: incomingMsg._id || m._id } : m));
+          }
+
+          return [...prev, incomingMsg];
         });
         setTimeout(scrollToBottom, 100);
+      }
+    };
+
+    const handleRoomRead = (payload: { roomId?: string; unreadCount?: number }) => {
+      if (String(payload.roomId) === String(room._id)) {
+        setMessages((prev) => prev);
       }
     };
 
@@ -128,10 +158,12 @@ export const IncidentChatPanel: React.FC<Props> = ({
     };
 
     socket.on("new_message", handleNewMessage);
+    socket.on("room_read", handleRoomRead);
     socket.on("room_resolved", handleRoomResolved);
 
     return () => {
       socket.off("new_message", handleNewMessage);
+      socket.off("room_read", handleRoomRead);
       socket.off("room_resolved", handleRoomResolved);
     };
   }, [socket, room?._id, onResolve]);
@@ -141,6 +173,21 @@ export const IncidentChatPanel: React.FC<Props> = ({
     const textToSend = (customText || inputText).trim();
     if (!textToSend && !attachmentUrl.trim()) return;
     if (!socket || !room?._id || !user) return;
+
+    socket.emit("join_room", { roomId: room._id });
+
+    const optimisticMessage: ChatMessage = {
+      _id: `optimistic-${Date.now()}`,
+      roomId: room._id,
+      senderId: user.id,
+      senderName: user.userName || "You",
+      senderRole: user.role,
+      text: textToSend || "Shared an attachment evidence.",
+      timestamp: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+    };
+
+    setMessages((prev) => [...prev, optimisticMessage]);
 
     const attachments: string[] = [];
     if (attachmentUrl.trim()) {

@@ -50,9 +50,10 @@ export const incidentService = {
     return response.data.data;
   },
 
-  escalateToManager: async (incidentId: string, managerId: string, issueTitle: string): Promise<Record<string, unknown>> => {
+  escalateToManager: async (incidentId: string, managerIds: string | string[], issueTitle: string): Promise<Record<string, unknown>> => {
+    const normalizedManagerIds = Array.isArray(managerIds) ? managerIds : [managerIds];
     const response = await api.post<{ success: boolean; data: Record<string, unknown> }>(`/incidents/${incidentId}/escalate-to-manager`, {
-      managerId,
+      managerIds: normalizedManagerIds,
       issueTitle,
     });
     return response.data.data;

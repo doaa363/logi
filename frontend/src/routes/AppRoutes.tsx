@@ -9,6 +9,7 @@ import IncidentDetailsPage from "../features/incident/pages/IncidentDetailsPage"
 import CSIncidentHub from "../features/incident/pages/CSIncidentHub";
 import CSChatHub from "../features/incident/pages/CSChatHub";
 import ManagerEscalationWorkspace from "../features/incident/pages/ManagerEscalationWorkspace";
+import ManagerDashboardPage from "../features/incident/pages/ManagerDashboardPage";
 import DriverReconciliationPage from "../features/shipment/pages/DriverReconciliationPage";
 import LiveTrackingPage from "../features/shipment/pages/LiveTrackingPage";
 import { DepartmentDetailPage } from "../features/department/pages/DepartmentDetailPage";
@@ -38,6 +39,9 @@ export default function AppRoutes() {
         <Route path="/register" element={<RegisterPage />} />
         <Route element={<ProtectedRoute />}>
           <Route element={<DashbordLayout />}>
+            <Route element={<ProtectedRoute allowedRoles={[UserRole.OWNER, UserRole.CS_MANAGER, UserRole.DRIVER_MANAGER]} />}>
+              <Route path="/dashboard/manager" element={<ManagerDashboardPage />} />
+            </Route>
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/dashboard/cs" element={<Dashboard />} />
             <Route path="/dashboard/cs-incidents" element={<CSIncidentHub />} />

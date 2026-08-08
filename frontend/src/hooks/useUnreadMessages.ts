@@ -51,16 +51,15 @@ export function useUnreadMessages() {
   useEffect(() => {
     if (!socket || !chatRoute) return;
 
-    const handleNewMessage = (msg: any) => {
-      const senderId = String(msg.senderId);
+    const handleUnreadNotification = (payload: any) => {
+      const senderId = String(payload.senderId);
       if (senderId === String(user?.id)) return;
-      // Don't count if on any of the reset routes
       if (resetRoutes.some((r) => pathnameRef.current.startsWith(r))) return;
-      setUnreadTotal((prev) => prev + 1);
+      setUnreadTotal((prev) => prev + (payload.unreadCount || 1));
     };
 
-    socket.on("new_message", handleNewMessage);
-    return () => { socket.off("new_message", handleNewMessage); };
+    socket.on("unread_notification", handleUnreadNotification);
+    return () => { socket.off("unread_notification", handleUnreadNotification); };
   }, [socket, chatRoute, user?.id]);
 
   return { unreadTotal, chatRoute };

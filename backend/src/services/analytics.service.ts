@@ -31,6 +31,7 @@ export class AnalyticsService {
       shipmentsByStatus,
       deliveredCount,
       openIncidents,
+      escalatedIncidents,
       incidentsBySeverity,
       recentShipments,
       recentIncidents,
@@ -62,6 +63,15 @@ export class AnalyticsService {
       Incident.countDocuments({
         companyId: objectId,
         status: IncidentStatus.OPEN,
+      }),
+
+      // Escalated incidents that need manager attention
+      Incident.countDocuments({
+        companyId: objectId,
+        $or: [
+          { status: IncidentStatus.IN_PROGRESS },
+          { escalatedByManager: true },
+        ],
       }),
 
       // Incidents by severity
@@ -106,6 +116,11 @@ export class AnalyticsService {
           severity: item._id,
           count: item.count,
         })),
+      },
+      managerDashboard: {
+        openIncidents: openIncidents,
+        escalatedIncidents: escalatedIncidents,
+        notificationCount: openIncidents + escalatedIncidents,
       },
       cashMetrics: cashSummary,
       recentActivity: {

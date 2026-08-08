@@ -70,7 +70,7 @@ export default function Sidebar() {
     return localStorage.getItem("sidebarCollapsed") === "true";
   });
 
-  const { unreadTotal, chatRoute } = useUnreadMessages();
+  const { unreadTotal } = useUnreadMessages();
 
   const toggleCollapse = () => {
     setIsCollapsed((prev) => {
@@ -95,7 +95,7 @@ export default function Sidebar() {
     Icon: React.ElementType,
     end?: boolean,
     badgeText?: string,
-    unreadCount?: number
+    unreadCount?: number,
   ) => {
     return (
       <NavLink
@@ -200,6 +200,9 @@ export default function Sidebar() {
             if (item.requiredRole) {
               return user && item.requiredRole.includes(user.role as string);
             }
+            if (item.to === "/dashboard" && user?.role === UserRole.CS_MANAGER) {
+              return false;
+            }
             return true;
           })
           .map((item) => {
@@ -219,9 +222,17 @@ export default function Sidebar() {
         }
 
         {/* Dedicated Executive Escalation Workspace for Managers */}
-        {user && ["CS_MANAGER", UserRole.CS_MANAGER, "DRIVER_MANAGER", UserRole.DRIVER_MANAGER, "FLEET_MANAGER", UserRole.FLEET_MANAGER, "OWNER", UserRole.OWNER, "ADMIN"].includes(user.role as string) &&
-          renderNavItem("/dashboard/escalations", "Escalations", "3-way manager suite", ShieldAlert)
-        }
+        {user && ["CS_MANAGER", UserRole.CS_MANAGER].includes(user.role as string) && (
+          <>
+            {renderNavItem(
+              "/dashboard/manager",
+              "My Dashboard",
+              "Notifications & queue",
+              LayoutDashboard
+            )}
+            {renderNavItem("/dashboard/escalations", "Escalations", "3-way manager suite", ShieldAlert)}
+          </>
+        )}
 
         {user && [UserRole.OWNER, "ADMIN"].includes(user.role as string) &&
           renderNavItem("/dashboard/departments", t("sidebarDepartments") || "Departments", "Provisioning", Building2)
@@ -231,7 +242,7 @@ export default function Sidebar() {
           renderNavItem(`/departments/${user.departmentId}`, "My Department", "Manage team", Users)
         }
 
-        {user && ["OWNER", "CS_MANAGER", "FLEET_MANAGER", "DRIVER_MANAGER", "FINANCE_MANAGER", "FINANCE_AGENT"].includes(user.role as string) && (
+        {user && ["OWNER", "FLEET_MANAGER", "DRIVER_MANAGER", "FINANCE_MANAGER", "FINANCE_AGENT"].includes(user.role as string) && (
           <>
             {renderNavItem("/dashboard/crisis", t("sidebarCrisisRooms") || "Crisis Rooms", "Live response", Radio)}
             {renderNavItem("/operations/map", "Live Tracking", "Fleet telemetry", MapPin)}
