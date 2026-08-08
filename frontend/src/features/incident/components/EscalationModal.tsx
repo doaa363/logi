@@ -5,7 +5,6 @@ import {
   ShieldAlert,
   X,
   Search,
-  UserCheck,
   Phone,
   Building2,
   MapPin,
@@ -32,7 +31,7 @@ export const EscalationModal: React.FC<Props> = ({ isOpen, onClose, incident, on
   const [managers, setManagers] = useState<BranchManager[]>([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
-  const [selectedManager, setSelectedManager] = useState<BranchManager | null>(null);
+  const [selectedManagers, setSelectedManagers] = useState<BranchManager[]>([]);
   const [issueTitle, setIssueTitle] = useState("");
   const [escalating, setEscalating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -51,12 +50,12 @@ export const EscalationModal: React.FC<Props> = ({ isOpen, onClose, incident, on
         const users = await incidentService.getCompanyUsers(user.companyId!);
         // Filter for executive & management roles
         const mgrs = users.filter((u) => {
-          const role = typeof u.role === "string" ? u.role : u.role;
+          const role = String(typeof u.role === "string" ? u.role : u.role ?? "").toUpperCase();
           return [UserRole.CS_MANAGER, UserRole.DRIVER_MANAGER, UserRole.OWNER].includes(role as UserRole);
         });
         setManagers(mgrs);
-        if (mgrs.length > 0 && !selectedManager) {
-          setSelectedManager(mgrs[0]);
+        if (mgrs.length > 0 && selectedManagers.length === 0) {
+          setSelectedManagers([mgrs[0]]);
         }
       } catch (err: any) {
         setError("Failed to load branch managers. Please try again.");
@@ -70,14 +69,14 @@ export const EscalationModal: React.FC<Props> = ({ isOpen, onClose, incident, on
 
   const handleEscalate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!incident || !selectedManager) return;
+    if (!incident || selectedManagers.length === 0) return;
 
     setEscalating(true);
     setError(null);
     try {
       const result = await incidentService.escalateToManager(
         incident._id,
-        selectedManager._id,
+        selectedManagers.map((manager) => manager._id),
         issueTitle || `Escalated Incident: ${incident.title}`
       );
       if (onSuccess) {
@@ -188,7 +187,7 @@ export const EscalationModal: React.FC<Props> = ({ isOpen, onClose, incident, on
               ) : filteredManagers.length > 0 ? (
                 <div className="space-y-2 max-h-[280px] overflow-y-auto pr-1">
                   {filteredManagers.map((m) => {
-                    const isSelected = selectedManager?._id === m._id;
+                    const isSelected = selectedManagers.some((selected) => selected._id === m._id);
                     const branchName = m.branchName || (typeof m.departmentId === "object" && m.departmentId?.name) || "Main HQ Dispatch";
                     const location = m.branchLocation || (typeof m.departmentId === "object" && m.departmentId?.location) || "Cairo Regional Terminal";
                     const isOnline = m.isOnline !== undefined ? m.isOnline : true; // visual default if undefined
@@ -196,20 +195,25 @@ export const EscalationModal: React.FC<Props> = ({ isOpen, onClose, incident, on
                     return (
                       <div
                         key={m._id}
-                        onClick={() => setSelectedManager(m)}
-                        className={`flex items-center justify-between p-4 rounded-2xl border cursor-pointer transition-all ${
-                          isSelected
+                        onClick={() => {
+                          setSelectedManagers((current) => {
+                            const alreadySelected = current.some((selected) => selected._id === m._id);
+                            return alreadySelected
+                              ? current.filter((selected) => selected._id !== m._id)
+                              : [...current, m];
+                          });
+                        }}
+                        className={`flex items-center justify-between p-4 rounded-2xl border cursor-pointer transition-all ${isSelected
                             ? "border-rose-500/80 bg-gradient-to-r from-rose-950/70 via-slate-900 to-slate-900 shadow-md ring-2 ring-rose-500/20"
                             : "border-slate-800 bg-slate-950/60 hover:bg-slate-800/40 hover:border-slate-700"
-                        }`}
+                          }`}
                       >
                         <div className="flex items-center gap-3.5 min-w-0">
                           <div className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-slate-800 to-slate-700 font-extrabold text-white text-sm shadow-inner">
                             {m.userName?.slice(0, 2).toUpperCase() || "MGR"}
                             <span
-                              className={`absolute -top-1 -right-1 h-3 w-3 rounded-full border-2 border-slate-900 ${
-                                isOnline ? "bg-emerald-500 shadow-sm shadow-emerald-500" : "bg-slate-600"
-                              }`}
+                              className={`absolute -top-1 -right-1 h-3 w-3 rounded-full border-2 border-slate-900 ${isOnline ? "bg-emerald-500 shadow-sm shadow-emerald-500" : "bg-slate-600"
+                                }`}
                               title={isOnline ? "Online Now" : "Offline / Standby"}
                             />
                           </div>
@@ -257,7 +261,7 @@ export const EscalationModal: React.FC<Props> = ({ isOpen, onClose, incident, on
             </div>
 
             {/* Summary Alert Box */}
-            {selectedManager && (
+            {selectedManagers.length > 0 && (
               <div className="rounded-2xl bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent border border-amber-500/30 p-4 text-xs text-amber-300">
                 <p className="font-extrabold flex items-center gap-1.5 text-amber-400">
                   <Radio className="h-3.5 w-3.5 animate-pulse text-amber-400" /> Live Socket Handover Protocol
@@ -265,8 +269,9 @@ export const EscalationModal: React.FC<Props> = ({ isOpen, onClose, incident, on
                 <p className="mt-1 opacity-90 leading-relaxed">
                   Escalating will transfer incident <strong className="text-white">#{incident?._id.slice(-6)}</strong> status to{" "}
                   <span className="font-bold underline">IN_PROGRESS (ESCALATED)</span>, automatically inject{" "}
-                  <strong className="text-white">{selectedManager.userName}</strong> into the secure incident chat room, and emit an urgent high-priority siren signal to their workspace.
-                </p>
+                  <strong className="text-white">
+                    {selectedManagers.map((m) => m.userName).join(", ")}
+                  </strong>                </p>
               </div>
             )}
 
@@ -281,7 +286,7 @@ export const EscalationModal: React.FC<Props> = ({ isOpen, onClose, incident, on
               </button>
               <button
                 type="submit"
-                disabled={escalating || !selectedManager}
+                disabled={escalating || selectedManagers.length === 0}
                 className="flex items-center gap-2 rounded-2xl bg-gradient-to-r from-rose-600 to-red-600 px-6 py-3.5 text-sm font-black text-white shadow-xl shadow-rose-600/30 hover:scale-[1.02] active:scale-98 transition-transform disabled:opacity-50"
               >
                 {escalating ? (

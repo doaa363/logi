@@ -65,21 +65,19 @@ export default function CSChatHub() {
     socket.on("new_escalation_chat", refresh);
 
     // Unread badge: increment count for any room that gets a message while not active
-    const handleNewMessage = (msg: any) => {
-      const roomId = String(msg.roomId);
-      const senderId = String(msg.senderId);
-      // Skip if it's the currently open room or if I sent it
+    const handleUnreadNotification = (payload: any) => {
+      const roomId = String(payload.roomId);
       if (roomId === activeRoomIdRef.current) return;
-      if (senderId === String(user?.id)) return;
-      setUnreadCounts((prev) => ({ ...prev, [roomId]: (prev[roomId] || 0) + 1 }));
+      if (String(payload.senderId) === String(user?.id)) return;
+      setUnreadCounts((prev) => ({ ...prev, [roomId]: payload.unreadCount || (prev[roomId] || 0) + 1 }));
     };
 
-    socket.on("new_message", handleNewMessage);
+    socket.on("unread_notification", handleUnreadNotification);
 
     return () => {
       socket.off("fleet:incident_alert", refresh);
       socket.off("new_escalation_chat", refresh);
-      socket.off("new_message", handleNewMessage);
+      socket.off("unread_notification", handleUnreadNotification);
     };
   }, [socket, user?.id]);
 
@@ -93,6 +91,9 @@ export default function CSChatHub() {
     // Mark room as active & clear its unread count
     activeRoomIdRef.current = room._id;
     setUnreadCounts((prev) => ({ ...prev, [room._id]: 0 }));
+    if (socket && room._id) {
+      socket.emit("join_room", { roomId: room._id });
+    }
 
     const incidentId =
       typeof room.incidentId === "object" ? room.incidentId._id : String(room.incidentId);

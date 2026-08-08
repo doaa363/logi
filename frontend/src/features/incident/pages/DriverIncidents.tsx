@@ -227,20 +227,20 @@ export default function DriverIncidents() {
   // Socket: track unread messages per incident chatRoom
   useEffect(() => {
     if (!socket) return;
-    const handleNewMessage = (msg: any) => {
-      const roomId = String(msg.roomId);
+    const handleUnreadNotification = (payload: any) => {
+      const roomId = String(payload.roomId);
       if (roomId === activeRoomIdRef.current) return;
-      if (String(msg.senderId) === String(user?.id)) return;
+      if (String(payload.senderId) === String(user?.id)) return;
       setReportedIncidents((prev) => {
         const matched = prev.find((inc) => String(inc.chatRoomId) === roomId);
         if (matched) {
-          setUnreadCounts((counts) => ({ ...counts, [matched._id]: (counts[matched._id] || 0) + 1 }));
+          setUnreadCounts((counts) => ({ ...counts, [matched._id]: payload.unreadCount || (counts[matched._id] || 0) + 1 }));
         }
         return prev;
       });
     };
-    socket.on("new_message", handleNewMessage);
-    return () => { socket.off("new_message", handleNewMessage); };
+    socket.on("unread_notification", handleUnreadNotification);
+    return () => { socket.off("unread_notification", handleUnreadNotification); };
   }, [socket, user?.id]);
 
   useEffect(() => {
@@ -308,8 +308,14 @@ export default function DriverIncidents() {
       
       // Open real-time chat immediately
       if (newIncident && newIncident._id) {
-        activeRoomIdRef.current = newIncident.chatRoomId || null;
+        const roomId = typeof newIncident.chatRoomId === "object"
+          ? String((newIncident.chatRoomId as any)?._id || "")
+          : String(newIncident.chatRoomId || "");
+        activeRoomIdRef.current = roomId || null;
         setUnreadCounts((prev) => ({ ...prev, [newIncident._id]: 0 }));
+        if (socket && roomId) {
+          socket.emit("join_room", { roomId });
+        }
         setActiveChatIncident(newIncident);
       }
     } catch (err: any) {
@@ -719,8 +725,14 @@ export default function DriverIncidents() {
                           animate={{ opacity: 1, y: 0 }}
                           transition={{ delay: idx * 0.05 }}
                           onClick={() => {
-                            activeRoomIdRef.current = incident.chatRoomId || null;
+                            const roomId = typeof incident.chatRoomId === "object"
+                              ? String((incident.chatRoomId as any)?._id || "")
+                              : String(incident.chatRoomId || "");
+                            activeRoomIdRef.current = roomId || null;
                             setUnreadCounts((prev) => ({ ...prev, [incident._id]: 0 }));
+                            if (socket && roomId) {
+                              socket.emit("join_room", { roomId });
+                            }
                             setActiveChatIncident(incident);
                           }}
                           className={`group flex items-center justify-between gap-3 rounded-2xl border p-4 transition cursor-pointer hover:shadow-sm ${

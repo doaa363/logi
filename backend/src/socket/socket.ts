@@ -3,8 +3,56 @@ import type { Server as HttpServer } from "http";
 import jwt from "jsonwebtoken";
 import mongoose from "mongoose";
 import { User } from "../models/User.model.js";
+import { UserRole } from "../types/user.type.js";
 
 let io: SocketServer | null = null;
+
+const unreadState = new Map<string, Map<string, number>>();
+
+function getUnreadMap(userId: string): Map<string, number> {
+  if (!unreadState.has(userId)) {
+    unreadState.set(userId, new Map<string, number>());
+  }
+  return unreadState.get(userId)!;
+}
+
+function incrementUnreadCount(userId: string, roomId: string) {
+  const userUnreadMap = getUnreadMap(userId);
+  const currentCount = userUnreadMap.get(roomId) || 0;
+  userUnreadMap.set(roomId, currentCount + 1);
+  return userUnreadMap.get(roomId)!;
+}
+
+function clearUnreadCount(userId: string, roomId: string) {
+  const userUnreadMap = getUnreadMap(userId);
+  userUnreadMap.delete(roomId);
+}
+
+async function shouldNotifyRecipient(recipientId: string, room: any, senderRole?: string) {
+  const recipient = await User.findById(recipientId).select("role").lean();
+  if (!recipient) return false;
+
+  const recipientRole = recipient.role as UserRole;
+  const isParticipant = room.participants.some((participant: any) => String(participant) === recipientId);
+
+  if (recipientRole === UserRole.OWNER) {
+    return true;
+  }
+
+  if (recipientRole === UserRole.CS_MANAGER) {
+    return isParticipant;
+  }
+
+  if (recipientRole === UserRole.DRIVER) {
+    return isParticipant && room.type === "INCIDENT";
+  }
+
+  if (recipientRole === UserRole.DRIVER_MANAGER) {
+    return isParticipant;
+  }
+
+  return isParticipant;
+}
 
 /**
  * initSocket
@@ -135,6 +183,8 @@ export function initSocket(httpServer: HttpServer): SocketServer {
         }
 
         await socket.join(roomId);
+        clearUnreadCount(userId, roomId);
+        socket.emit("room_read", { roomId, unreadCount: 0 });
         socket.emit("room_joined", { roomId });
       } catch (err) {
         console.error("[Socket] Error in join_room:", err);
@@ -184,8 +234,26 @@ export function initSocket(httpServer: HttpServer): SocketServer {
         });
         await newMessage.save();
 
-        // Broadcast to all clients in the room
+        // Broadcast the message to the room and notify every other participant about unread state.
         io!.to(roomId).emit("new_message", newMessage.toJSON());
+
+        const recipientIds = room.participants
+          .filter((participant: any) => String(participant) !== String(userId))
+          .map((participant: any) => String(participant));
+
+        for (const recipientId of recipientIds) {
+          const shouldNotify = await shouldNotifyRecipient(recipientId, room, sender.role);
+          if (!shouldNotify) continue;
+
+          const unreadCount = incrementUnreadCount(recipientId, roomId);
+          io!.to(`user_${recipientId}`).emit("unread_notification", {
+            roomId,
+            incidentId: room.incidentId ? String(room.incidentId) : null,
+            senderId: userId,
+            senderName: sender.userName,
+            unreadCount,
+          });
+        }
       } catch (err) {
         console.error("[Socket] Error in send_message:", err);
       }

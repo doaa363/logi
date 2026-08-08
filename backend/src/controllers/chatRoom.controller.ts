@@ -7,6 +7,7 @@ import { Message } from "../models/Message.model.js";
 import { Incident } from "../models/Incedent.model.js";
 import { UserRole } from "../types/user.type.js";
 import { getIo } from "../socket/socket.js";
+import { dispatchCsManagerNotification, managerExtensionsService } from "../services/managerExtensions.service.js";
 import mongoose from "mongoose";
 
 export class ChatRoomController {
@@ -28,7 +29,8 @@ export class ChatRoomController {
         query.type = type;
       }
 
-      // Drivers and CS_AGENTs only see their own rooms + unassigned rooms
+      // Drivers and CS_AGENTs only see their own rooms + unassigned rooms.
+      // Managers only see rooms where they were invited as participants.
       if (req.user?.role === UserRole.DRIVER) {
         query.participants = req.user.sub;
       } else if (req.user?.role === UserRole.CS_AGENT) {
@@ -43,6 +45,8 @@ export class ChatRoomController {
           { companyId: new mongoose.Types.ObjectId(companyId), participants: { $not: { $elemMatch: { $in: csAgentIds } } } },
         ];
         delete query.companyId; // remove top-level companyId since it's now inside $or
+      } else if ([UserRole.CS_MANAGER, UserRole.DRIVER_MANAGER].includes(req.user?.role as UserRole)) {
+        query.participants = req.user.sub;
       }
 
       const rooms = await ChatRoom.find(query)
@@ -80,17 +84,15 @@ export class ChatRoomController {
         return res.status(404).json({ success: false, message: "Chat room not found" });
       }
 
-      // Managers (CS_MANAGER, DRIVER_MANAGER, OWNER) can oversee all rooms
-      // CS_AGENT can only access rooms they are a participant in
-      const isManager = req.user?.role && [
-        UserRole.CS_MANAGER, UserRole.DRIVER_MANAGER, UserRole.OWNER
-      ].includes(req.user.role as UserRole);
+      // Owners can continue to oversee all rooms, while invited managers are limited to their invited rooms.
+      const isOwner = req.user?.role === UserRole.OWNER;
+      const isManager = req.user?.role && [UserRole.CS_MANAGER, UserRole.DRIVER_MANAGER].includes(req.user.role as UserRole);
 
       const isParticipant = room.participants.some(
         (p: mongoose.Types.ObjectId) => String(p) === String(req.user?.sub)
       );
 
-      if (!isParticipant && !isManager) {
+      if (!isParticipant && !isOwner) {
         return res.status(403).json({ success: false, message: "Access denied. Not a participant of this room." });
       }
 
@@ -161,6 +163,14 @@ export class ChatRoomController {
         io.to(`user_${managerId}`).emit("new_escalation_chat", populatedRoom);
       }
 
+      await dispatchCsManagerNotification({
+        event: "chat:escalation_room_created",
+        companyId,
+        incidentId: undefined,
+        managerIds: [String(managerId)],
+        roomId: String(newRoom._id),
+      });
+
       return res.status(201).json({ success: true, data: populatedRoom });
     } catch (error: any) {
       return res.status(500).json({ success: false, message: error.message });
@@ -226,6 +236,13 @@ export class ChatRoomController {
           message: "The incident has been resolved and the chat room is now closed."
         });
       }
+
+      await managerExtensionsService.notifyManagers({
+        event: "incident_resolved",
+        companyId,
+        incidentId: String(incident._id),
+        senderId: String(userId),
+      });
 
       return res.status(200).json({
         success: true,

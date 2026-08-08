@@ -4,6 +4,7 @@ import { Incident } from "../models/Incedent.model.js";
 import { ChatRoom, ChatRoomType } from "../models/ChatRoom.model.js";
 import { UserRole } from "../types/user.type.js";
 import { getIo } from "../socket/socket.js";
+import { dispatchCsManagerNotification, managerExtensionsService } from "../services/managerExtensions.service.js";
 import mongoose from "mongoose";
 
 export class IncidentActionController {
@@ -111,6 +112,20 @@ export class IncidentActionController {
         });
       }
 
+      await managerExtensionsService.notifyManagers({
+        event: "incident_escalated",
+        companyId,
+        incidentId: String(incident._id),
+        senderId: String(req.user?.sub),
+      });
+
+      await dispatchCsManagerNotification({
+        event: "incident:escalated",
+        companyId: String(companyId),
+        incidentId: String(incident._id),
+        managerIds: [String(req.user?.sub)],
+      });
+
       return res.status(200).json({
         success: true,
         message: "Incident escalated successfully.",
@@ -129,12 +144,22 @@ export class IncidentActionController {
   async escalateToManager(req: AuthRequest, res: Response) {
     try {
       const { id } = req.params;
-      const { managerId, issueTitle } = req.body;
+      const { managerId, managerIds, issueTitle } = req.body;
       const companyId = req.user?.companyId;
       const userId = req.user?.sub;
 
-      if (!id || !managerId || !companyId || !mongoose.Types.ObjectId.isValid(id as string) || !mongoose.Types.ObjectId.isValid(managerId as string)) {
-        return res.status(400).json({ success: false, message: "Invalid incident ID, manager ID, or missing context" });
+      const rawManagerIds = Array.isArray(managerIds)
+        ? managerIds
+        : managerId
+          ? [managerId]
+          : [];
+
+      const normalizedManagerIds = rawManagerIds
+        .filter((value): value is string => typeof value === "string" && Boolean(value))
+        .filter((value) => mongoose.Types.ObjectId.isValid(value));
+
+      if (!id || normalizedManagerIds.length === 0 || !companyId || !mongoose.Types.ObjectId.isValid(id as string)) {
+        return res.status(400).json({ success: false, message: "Invalid incident ID, manager selection, or missing context" });
       }
 
       const incident = await Incident.findOne({
@@ -146,10 +171,11 @@ export class IncidentActionController {
         return res.status(404).json({ success: false, message: "Incident not found" });
       }
 
-      const managerObjId = new mongoose.Types.ObjectId(managerId as string);
+      const managerObjIds = normalizedManagerIds.map((managerIdValue) => new mongoose.Types.ObjectId(managerIdValue));
+      const primaryManagerObjId = managerObjIds[0];
       incident.escalatedByManager = true;
       incident.escalatedBy = new mongoose.Types.ObjectId(userId);
-      incident.assignedTo = managerObjId;
+      incident.assignedTo = primaryManagerObjId;
       incident.status = "IN_PROGRESS" as any;
       await incident.save();
 
@@ -166,8 +192,8 @@ export class IncidentActionController {
         if (userId && String(incident.reportedBy) !== String(userId)) {
           participantsList.push(new mongoose.Types.ObjectId(userId));
         }
-        participantsList.push(managerObjId);
-        
+        participantsList.push(...managerObjIds);
+
         room = await ChatRoom.create({
           companyId: new mongoose.Types.ObjectId(companyId as string),
           type: ChatRoomType.INCIDENT,
@@ -179,9 +205,14 @@ export class IncidentActionController {
         incident.chatRoomId = room._id as any;
         await incident.save();
       } else {
-        await ChatRoom.findByIdAndUpdate(room._id, {
-          $addToSet: { participants: managerObjId }
-        });
+        const roomParticipants = room.participants || [];
+        const newlyAddedManagers = managerObjIds.filter((managerObjId) => !roomParticipants.some((participant: mongoose.Types.ObjectId) => String(participant) === String(managerObjId)));
+
+        if (newlyAddedManagers.length > 0) {
+          await ChatRoom.findByIdAndUpdate(room._id, {
+            $addToSet: { participants: { $each: newlyAddedManagers } }
+          });
+        }
         if (issueTitle && !room.title) {
           room.title = issueTitle;
           await room.save();
@@ -196,24 +227,43 @@ export class IncidentActionController {
       // Emit real-time socket events
       const io = getIo();
       if (io) {
-        io.to(`user_${managerId}`).emit("new_escalation_chat", {
-          room: populatedRoom,
-          incident,
-          escalationTitle: issueTitle || incident.title,
-          escalatedBy: req.user?.sub,
-          timestamp: new Date().toISOString()
-        });
-        io.to(`user_${managerId}`).emit("incident:escalated", {
-          incidentId: incident._id,
-          escalatedBy: req.user?.sub,
-          message: `🚨 Emergency Escalation: ${issueTitle || incident.title}`
-        });
+        for (const managerObjId of managerObjIds) {
+          const managerIdValue = String(managerObjId);
+          io.to(`user_${managerIdValue}`).emit("new_escalation_chat", {
+            room: populatedRoom,
+            incident,
+            escalationTitle: issueTitle || incident.title,
+            escalatedBy: req.user?.sub,
+            timestamp: new Date().toISOString()
+          });
+          io.to(`user_${managerIdValue}`).emit("incident:escalated", {
+            incidentId: incident._id,
+            escalatedBy: req.user?.sub,
+            message: `🚨 Emergency Escalation: ${issueTitle || incident.title}`
+          });
+        }
         io.to(String(room._id)).emit("incident:escalation_updated", {
           incident,
-          managerId,
+          managerIds: normalizedManagerIds,
           room: populatedRoom
         });
       }
+
+      await managerExtensionsService.notifyManagers({
+        event: "manager_added",
+        companyId,
+        incidentId: String(incident._id),
+        managerIds: normalizedManagerIds,
+        senderId: String(req.user?.sub),
+      });
+
+      await dispatchCsManagerNotification({
+        event: "incident:escalated_to_manager",
+        companyId: String(companyId),
+        incidentId: String(incident._id),
+        managerIds: managerObjIds.map((id) => String(id)),
+        roomId: String(room._id),
+      });
 
       return res.status(200).json({
         success: true,
