@@ -25,7 +25,9 @@ import {
   ShieldAlert,
   Headphones,
   MessageSquare,
+  BrainCircuit,
 } from "lucide-react";
+import { ENABLE_RAG } from "../../constants/apiEndpoints";
 
 interface NavItemConfig {
   to: string;
@@ -236,6 +238,10 @@ export default function Sidebar() {
 
         {user && [UserRole.OWNER, "ADMIN"].includes(user.role as string) &&
           renderNavItem("/dashboard/departments", t("sidebarDepartments") || "Departments", "Provisioning", Building2)
+        }
+
+        {ENABLE_RAG &&
+          renderNavItem("/ai-assistant", "AI Assistant", "RAG-powered insights", BrainCircuit)
         }
 
         {user && ["FINANCE_MANAGER", "CS_MANAGER", "FLEET_MANAGER", "DRIVER_MANAGER"].includes(user.role as string) && user.departmentId &&

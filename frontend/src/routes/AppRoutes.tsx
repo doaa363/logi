@@ -1,6 +1,8 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import RegisterPage from "../features/auth/pages/RegisterPage";
 import LoginPage from "../features/auth/pages/LoginPage";
+import RAGTestPage from "../pages/RAGTestPage";
+import { ENABLE_RAG } from "../constants/apiEndpoints";
 import Dashboard from "../pages/Dashboard";
 import ShipmentsPage from "../features/shipment/pages/ShipmentsPage";
 import ShipmentDetailsPage from "../features/shipment/pages/ShipmentDetailsPage";
@@ -66,6 +68,7 @@ export default function AppRoutes() {
             </Route>
 
             <Route path="/operations/map" element={<LiveTrackingPage />} />
+            {ENABLE_RAG && <Route path="/ai-assistant" element={<RAGTestPage />} />}
           </Route>
         </Route>
       </Routes>

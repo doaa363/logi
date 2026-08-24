@@ -2,7 +2,7 @@ import joi from "joi";
 
 export const registerSchema = joi.object({
     companyName: joi.string().min(3).max(100).required(),
-    slug: joi.string().min(3).max(100).optional(),
+    slug: joi.string().min(2).max(100).optional(),
     industry: joi.string().min(3).max(100).default("LOGISTICS").required(),
     companyEmail: joi.string().email().required(),
     name: joi.string().min(2).max(100).required(),
